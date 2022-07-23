@@ -1,13 +1,13 @@
 import ccxt from 'ccxt';
-import { RSI } from 'technicalindicators';
 
-import { pairs, LOOP_INTERVALS, RSI_DISTANCE_INDICATOR } from './Constants.js';
-import { PairInfo, Exchange, Period, Level } from './Types.js';
+import { pairs, LOOP_INTERVALS } from './Constants.js';
+import { PairInfo, Exchange, Period, Signal } from './Types.js';
 import {
     sleep,
     formatOHLCV,
-    previousImportantRSILevel,
 } from './Utilities.js';
+import { RSI } from './RSI.js';
+import { AwesomeOscillator } from './AwesomeOscillator.js';
 
 async function init(pairs: PairInfo[]) {
     const phemex = new ccxt.phemex();
@@ -45,22 +45,37 @@ async function getOHLCV(exchange: any, symbol: string, period: string) {
     return ohlcv;
 }
 
+function processSignal(signal: Signal, pair: PairInfo, period: Period, indicator: string) {
+    if (signal === Signal.None) {
+        return;
+    }
+
+    if (signal === Signal.Long) {
+        console.log(`ALERT: ${indicator} Enter long signal on ${period}, ${pair.label}`);
+        return;
+    }
+
+    if (signal === Signal.Short) {
+        console.log(`ALERT: ${indicator} Enter short signal on ${period}, ${pair.label}`);
+        return;
+    }
+}
+
 async function watchMarket(exchange: any, market: any, pair: PairInfo, period: Period, loadingComplete: () => void) {
     const sleepInterval = LOOP_INTERVALS[period];
 
     let ohlcv = await getOHLCV(exchange, pair.symbol, period);
 
-    let rsiData = new RSI({
-        values: ohlcv.closes,
-        period: 14,
-    });
-
     let price = await exchange.fetchTicker(market.id);
 
-    let previousRSI = rsiData.nextValue(price.last)!;
-    let previousImportantLevel = previousImportantRSILevel([...rsiData.getResult(), previousRSI]);
+    const rsi = new RSI(ohlcv.closes, price.last);
 
-    console.log(`Loaded ${pair.label} ${period}, price: $${price.last}, RSI trend: ${previousImportantLevel === Level.Positive ? 'Positive' : 'Negative'}`);
+    const awesome = new AwesomeOscillator(
+        ohlcv.highs,
+        ohlcv.lows,
+    );
+
+    console.log(`Loaded ${pair.label} ${period}, RSI trend: ${rsi.trend}, Awesome Trend: ${awesome.trend}`);
 
     loadingComplete();
 
@@ -70,36 +85,11 @@ async function watchMarket(exchange: any, market: any, pair: PairInfo, period: P
         price = await exchange.fetchTicker(market.id);
         ohlcv = await getOHLCV(exchange, pair.symbol, period);
 
-        rsiData = new RSI({
-            values: ohlcv.closes,
-            period: 14,
-        });
+        const rsiSignal = rsi.processNewData(ohlcv.closes, price.last);
+        const awesomeSignal = awesome.processNewData(ohlcv.highs, ohlcv.lows);
 
-        const rsi = rsiData.nextValue(price.last);
-        let newLevel = previousImportantLevel;
-
-        if (rsi) {
-            if (previousRSI > 50 && rsi < 50) {
-                console.log(`ALERT: RSI flipped negative on ${period}, ${pair.label}`);
-            }
-
-            if (previousRSI < 50 && rsi > 50) {
-                console.log(`ALERT: RSI flipped positive on ${period}, ${pair.label}`);
-            }
-
-            if (rsi >= (50 + RSI_DISTANCE_INDICATOR) && previousImportantLevel === Level.Negative) {
-                console.log(`ALERT: Enter long signal on ${period}, ${pair.label}`);
-                newLevel = Level.Positive;
-            }
-
-            if (rsi <= (50 - RSI_DISTANCE_INDICATOR) && previousImportantLevel === Level.Positive) {
-                console.log(`ALERT: Enter short signal on ${period}, ${pair.label}`);
-                newLevel = Level.Negative;
-            }
-
-            previousRSI = rsi;
-            previousImportantLevel = newLevel;
-        }
+        processSignal(rsiSignal, pair, period, 'RSI');
+        processSignal(awesomeSignal, pair, period, 'AO');
     }
 }
 

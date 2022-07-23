@@ -1,6 +1,12 @@
-export enum Level {
-    Positive,
-    Negative,
+export enum Signal {
+    None = 0,
+    Short,
+    Long,
+}
+
+export enum Trend {
+    Positive = 'Positive',
+    Negative = 'Negative',
 }
 
 export enum Exchange {
@@ -9,6 +15,7 @@ export enum Exchange {
 
 export enum Period {
     FourHour = '4h',
+    EightHour = '8h',
     TwelveHour = '12h',
     OneDay = '1d',
 }
